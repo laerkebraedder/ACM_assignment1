@@ -1,0 +1,342 @@
+---
+title: "Cleaning"
+author: "Lærke Brædder"
+date: "2023-02-22"
+output: html_document
+---
+
+```{r defining variables}
+# Define variables:
+
+sims <- 100
+
+trials <- 120
+
+otherRate <- 0.7 # The bias for the random opponent
+
+memspan <- 3 # How many previous trials are in the memory span of the agent
+
+currentAgent <-"WSLS" # For the agents that whitch between WSLS and LSWS, we set the starting strategy to WSLS
+
+
+
+
+
+feedback_track <- rep(NA, trials) # Not a variable. It is an object in which the feedback is tracked.
+```
+
+
+```{r loading packages}
+pacman::p_load(tidyverse, ggplot2)
+```
+
+
+
+```{r Agents}
+
+# Random
+randomAgent_f <- function(bias) {
+  choice <- rbinom  (1, 1, bias) # We specify a mechanism and decision making
+  return(choice)
+}
+
+
+
+# Lose-Stay-Win-Shift
+LSWSAgent_f <- function(prevChoice, Feedback){
+  if (Feedback == 1){ 
+    choice = 1-prevChoice 
+  } else if (Feedback == 0) { 
+      choice = prevChoice }                     
+  choice <<-(choice) }
+
+
+
+# Win-Stay-Lose-Shift
+WSLSAgent_f <- function(prevChoice, Feedback){
+  if (Feedback == 1){ 
+    choice = prevChoice 
+  } else if (Feedback == 0) { 
+      choice = 1-prevChoice }                     
+  choice <<-(choice) }
+
+
+
+# Agent that switches between LSWS and WSLS whenever it has lost x rounds in a row
+switch_f <- function(prevChoice, feedback){
+  memory <- tail(feedback_list[!is.na(feedback_list)], n=memspan) # removes any NAs and takes the last menspan(3) from feedback_list.
+  if (length(memory) == memspan & sum(memory) == 0) {        #if memory is full/as long as menspan and the sum = 0(aka 3 loses in a row), then switch tactic.
+    if (currentAgent == "WSLS") {
+      currentAgent <<- "LSWS" 
+      #print(currentAgent) # used to check if the function is doing what we want it to
+      LSWSAgent_f(prevChoice, feedback)
+    }
+    else {
+      currentAgent <<- "WSLS"
+      #print(currentAgent)
+      WSLSAgent_f(prevChoice, feedback)
+    }
+    feedback_list <- rep(NA, trials+1)
+    feedback_list[1] <- 1   
+  }
+  
+  else {
+    if (currentAgent == "WSLS") {
+      currentAgent <<- "WSLS" 
+      #print(currentAgent)
+      WSLSAgent_f(prevChoice, feedback)
+    }
+    else if (currentAgent == "LSWS") {
+      currentAgent <<- "LSWS"
+      #print(currentAgent)
+      LSWSAgent_f(prevChoice, feedback)
+    }
+    
+  }
+  return(feedback_list)
+}
+
+
+```
+
+
+
+# Making the agents play the matching pennies game against each other
+
+## 1. WSLS agent against random agent
+```{r}
+df <- data.frame()
+
+runSims_WSLS_vs_Random <- function(sims, trails, otherRate) {
+  for (sim in 1:sims) {
+    self <- rep(NA, trials)
+    other <- rep(NA, trials)
+    
+    # Filling out the first choice for the agent (self) and all of the random choices for the opponent (other)
+    self[1] <- randomAgent_f(0.5)
+    for (t in seq(trials)) {
+      other[t] <- randomAgent_f(otherRate)
+    }
+    
+    # Setting up the matching pennies game between self and other
+    for (t in 2:trials){
+      if (self[t - 1] == other[t - 1]){
+        feedback = 1
+      } 
+      else {feedback = 0}
+      
+      self[t] <- WSLSAgent_f(self[t - 1], feedback)
+      
+      feedback_track[t] <- feedback
+    }
+    
+    # Saving the results from all simulations in a dataframe
+    d <- data.frame(cbind(self, other, feedback_track))
+    # Adding a column for simulation id
+    d$simulation <- sim
+    d$trial <- seq.int(nrow(d))
+    
+    # Appending the simulation results to the full dataframe
+    
+    df <- rbind(df, d)
+  }
+  
+  return(df)
+  
+}
+
+df_WSLS_vs_Random <- runSims_WSLS_vs_Random(sims, trials, otherRate)
+```
+
+
+## 2. Switcher agent against random agent
+```{r}
+
+feedback_list <- rep(NA, trials+1)
+
+runSims_switcher_vs_Random <- function(sims, trails, otherRate) {
+  
+  df <- data.frame()
+  
+  for (sim in 1:sims) {
+    # Creating empty lists for feedback, the choices of the agent, and for the choices of the opponent
+    self <- rep(NA, trials)
+    other <- rep(NA, trials)
+    
+    # Filling out the first choice for the agent (self) and all of the random choices for the opponent (other)
+    self[1] <- randomAgent_f(0.5) #xxx I think this means that for the first choice we make it random whether the agent chooses one hand or the other (because there is no previous choice to rely on).
+    for (t in seq(trials)) {
+      other[t] <- randomAgent_f(otherRate)
+    }
+    
+    # Setting up the matching pennies game between self and other
+    for (i in 2:trials) {
+      if (self[i - 1] == other[i - 1]) {
+        feedback = 1
+      }
+      else {
+        feedback = 0
+      }
+      
+      feedback_list[i] <- feedback
+      feedback_list <- switch_f(self[i - 1], feedback)
+      self[i] <- choice
+      
+      feedback_track[i] <- feedback
+    }
+    
+    # Saving the results from all simulations in a dataframe
+    d <- data.frame(cbind(self, other, feedback_track))
+    # Adding a column for simulation id
+    d$simulation <- sim
+    d$trial <- seq.int(nrow(d))
+    
+    # Appending the simulation results to the full dataframe
+    
+    df <- rbind(df, d)
+  }
+  
+  return(df)
+  
+}
+
+df_switcher_vs_Random <- runSims_switcher_vs_Random(sims, trials, otherRate)
+```
+
+
+## 3. WSLS agent against WSLS agent
+
+```{r}
+runSims_WSLS_vs_WSLS <- function(sims, trails, otherRate) {
+  
+  df <- data.frame()
+  
+  for (sim in 1:sims) {
+    self <- rep(NA, trials)
+    other <- rep(NA, trials)
+    self[1] <- randomAgent_f(0.5)
+    other[1] <- randomAgent_f(0.5)
+    
+    for (i in 2:trials){ 
+      if (self[i-1] == other[i-1]){ 
+        feedback = 1 
+        } 
+      else {
+        feedback = 0
+      }
+      
+      self[i] <- WSLSAgent_f(self[i-1], feedback) 
+      other[i] <- WSLSAgent_f(other[i-1], 1-feedback) 
+      
+      feedback_track[i] <- feedback
+    }
+    
+    # Saving the results from all simulations in a dataframe
+    d <- data.frame(cbind(self, other, feedback_track))
+    # Adding a column for simulation id
+    d$simulation <- sim
+    d$trial <- seq.int(nrow(d))
+    
+    # Appending the simulation results to the full dataframe
+    
+    df <- rbind(df, d)
+  }
+  
+  return(df)
+  
+}
+
+df_WSLS_vs_WSLS <- runSims_WSLS_vs_WSLS(sims, trials, otherRate)
+```
+
+
+## 3. Switch agent against WSLS agent
+
+```{r}
+runSims_switcher_vs_WSLS <- function(sims, trails, otherRate) {
+  
+  df <- data.frame()
+  
+  for (sim in 1:sims) {
+    self <- rep(NA, trials)
+    other <- rep(NA, trials)
+    self[1] <- randomAgent_f(0.5)
+    other[1] <- randomAgent_f(0.5)
+    
+    for (i in 2:trials){ 
+      if (self[i-1] == other[i-1]){ 
+        feedback = 1 
+        } 
+      else {
+        feedback = 0
+      }
+      
+      feedback_list[i] <- feedback
+      feedback_list <- switch_f(self[i - 1], feedback)
+      self[i] <- choice
+      other[i] <- WSLSAgent_f(other[i-1], 1-feedback) 
+      
+      feedback_track[i] <- feedback
+    }
+    
+    
+    # Saving the results from all simulations in a dataframe
+    d <- data.frame(cbind(self, other, feedback_track))
+    # Adding a column for simulation id
+    d$simulation <- sim
+    d$trial <- seq.int(nrow(d))
+    
+    # Appending the simulation results to the full dataframe
+    
+    df <- rbind(df, d)
+  }
+  
+  return(df)
+  
+}
+
+df_switcher_vs_WSLS <- runSims_switcher_vs_WSLS(sims, trials, otherRate)
+```
+
+
+
+
+```{r plotting function}
+
+
+aggregated_plot <- function(d) {
+  
+  # Creating separate feedback columns for the agent and the opponent
+  d$feedback_self <- d$feedback_track
+  d$feedback_other[d$feedback_self == 1] <- 0
+  d$feedback_other[d$feedback_self == 0] <- 1
+  d$feedback_other[d$feedback_other == 3] <- 0
+  # xxx Would have used the binary.flip() function to create the other column, however it is not supported by my version of R
+  
+  # Removing the NAs that are in every first trial
+  d <- na.omit(d)
+  
+  d <- group_by(d, trial)
+  d <- aggregate(d, list(d$trial), mean)
+  
+  d = d %>% mutate(trials = 1:nrow(d)) %>%  mutate(self_cummulated = cumsum(feedback_self)/seq_along(feedback_self),
+                                                   other_cummulated = cumsum(feedback_other)/seq_along(feedback_other))
+  
+  
+  return(d %>% ggplot() +
+           theme_classic() +
+           geom_line(color = "hotpink",aes(trials, self_cummulated)) +
+           geom_line(color = "cornflowerblue",aes(trials, other_cummulated)) +
+           geom_ribbon(fill = "hotpink",aes(x= trials, y = self_cummulated, ymin = self_cummulated - sd(self_cummulated), ymax = self_cummulated + sd(self_cummulated)), alpha = 0.1) +
+           geom_ribbon(fill = "cornflowerblue",aes(x= trials, y = other_cummulated, ymin = other_cummulated - sd(other_cummulated), ymax = other_cummulated + sd(other_cummulated)), alpha = 0.1) +
+           xlab("Trial") +
+           ylab("Percent of wins")
+           #ggtitle("Percentage of winnings for the agent (WSLS, blue) and the opponent (random, pink)")
+           )
+}
+
+aggregated_plot(df_WSLS_vs_Random)
+aggregated_plot(df_switcher_vs_Random)
+aggregated_plot(df_WSLS_vs_WSLS)
+aggregated_plot(df_switcher_vs_WSLS)
+```
